@@ -109,6 +109,8 @@ async function showPopup(x, y, text, context = '') {
         let chineseTranslation = '';
         let phonetic = '';
         let meaningsHtml = '';
+        let audioUrl = null;
+        let audioObj = null;
 
         if (isSingleWord) {
             const word = text.toLowerCase().replace(/[^a-z-]/g, '');
@@ -126,6 +128,19 @@ async function showPopup(x, y, text, context = '') {
 
             if (engData) {
                 phonetic = engData.phonetic || (engData.phonetics && engData.phonetics.find(p => p.text)?.text) || '';
+                
+                // Extract Audio
+                if (engData.phonetics) {
+                    const pWithAudio = engData.phonetics.find(p => p.audio && p.audio.length > 0);
+                    if (pWithAudio) {
+                        audioUrl = pWithAudio.audio;
+                        // Preload
+                        audioObj = new Audio(audioUrl);
+                        audioObj.preload = 'auto';
+                        audioObj.load(); 
+                    }
+                }
+
                 if (engData.meanings) {
                     engData.meanings.slice(0, 2).forEach(m => {
                         const def = m.definitions[0] || { definition: 'No definition' };
@@ -205,9 +220,66 @@ async function showPopup(x, y, text, context = '') {
             </div>
         `;
 
-        document.getElementById('wc-play-audio').addEventListener('click', (e) => {
+        const playBtn = document.getElementById('wc-play-audio');
+        playBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            chrome.runtime.sendMessage({ action: 'speak', word: text });
+            
+            // Visual feedback
+            const originalIcon = playBtn.innerHTML;
+            playBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="wc-spin"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"></path></svg>`;
+            
+            const restoreIcon = () => { playBtn.innerHTML = originalIcon; };
+
+            const playWithFallback = () => {
+                // Tier 1: Real Audio (Preloaded)
+                if (audioObj) {
+                    audioObj.currentTime = 0;
+                    audioObj.play()
+                        .then(() => restoreIcon())
+                        .catch(err => {
+                            console.warn("Real audio failed, trying Youdao...", err);
+                            tryYoudao();
+                        });
+                    return;
+                }
+                tryYoudao();
+            };
+
+            const tryYoudao = () => {
+                // Tier 2: Youdao TTS
+                // Note: Youdao works best for words and short phrases.
+                const youdaoUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&type=2`;
+                const ydAudio = new Audio(youdaoUrl);
+                
+                // Timeout fallback
+                const timeoutId = setTimeout(() => {
+                    console.warn("Online audio timeout, falling back to local TTS");
+                    fallbackToLocal();
+                }, 1500); // 1.5s timeout as promised
+
+                ydAudio.onplay = () => {
+                    clearTimeout(timeoutId);
+                    restoreIcon();
+                };
+
+                ydAudio.onerror = () => {
+                    clearTimeout(timeoutId);
+                    fallbackToLocal();
+                };
+
+                ydAudio.play().catch(() => {
+                    clearTimeout(timeoutId);
+                    fallbackToLocal();
+                });
+            };
+
+            const fallbackToLocal = () => {
+                // Tier 3: Chrome TTS
+                chrome.runtime.sendMessage({ action: 'speak', word: text });
+                restoreIcon();
+            };
+
+            playWithFallback();
         });
 
         const heartBtn = document.getElementById('wc-heart-btn');

@@ -316,3 +316,14 @@
 .wc-heart-btn.active .heart-icon {
     transform: scale(1.1);
 }
+
+/* Animation for loading spinner */
+@keyframes wc-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.wc-spin {
+    animation: wc-spin 1s linear infinite;
+    transform-origin: center;
+}

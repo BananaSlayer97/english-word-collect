@@ -15,6 +15,7 @@ async function initializeApp() {
     setupSearch();
     setupExport();
     setupImport(); // Add Import
+    setupSettings(); // Settings Tab
     setupMasteryTabs();
     setupFlashcards();
     setupQuizMode(); // Initialize Quiz
@@ -67,6 +68,7 @@ function setupNavigation() {
             }
             if (viewId === 'study') startStudyMode();
             if (viewId === 'sentences') renderSentencesGrid();
+            if (viewId === 'settings') loadSettingsUI();
         });
     });
 }
@@ -290,7 +292,7 @@ function renderWordList(filter = '') {
 
         row.querySelector('.btn-audio-mini').addEventListener('click', (e) => {
             const w = e.currentTarget.dataset.word;
-            chrome.runtime.sendMessage({ action: 'speak', word: w });
+            playAudioWithFallback(w, e.currentTarget);
         });
 
         row.querySelector('.btn-status').addEventListener('click', (e) => {
@@ -411,16 +413,16 @@ function setupQuizMode() {
     });
 
     // Audio Hint for Quiz
-    document.getElementById('quiz-play-audio').addEventListener('click', () => {
+    document.getElementById('quiz-play-audio').addEventListener('click', (e) => {
         if (currentQuizTarget) {
-            chrome.runtime.sendMessage({ action: 'speak', word: currentQuizTarget });
+            playAudioWithFallback(currentQuizTarget, e.currentTarget);
         }
     });
 
     // Audio Hint for Spelling
-    document.getElementById('spelling-play-audio').addEventListener('click', () => {
+    document.getElementById('spelling-play-audio').addEventListener('click', (e) => {
         if (currentSpellingTarget) {
-            chrome.runtime.sendMessage({ action: 'speak', word: currentSpellingTarget });
+            playAudioWithFallback(currentSpellingTarget, e.currentTarget);
         }
     });
 
@@ -590,8 +592,8 @@ function renderSentencesGrid() {
         `;
 
         // Event Listeners
-        card.querySelector('.speak-btn').addEventListener('click', () => {
-            chrome.runtime.sendMessage({ action: 'speak', word: text });
+        card.querySelector('.speak-btn').addEventListener('click', (e) => {
+            playAudioWithFallback(text, e.currentTarget);
         });
 
         card.querySelector('.copy-btn').addEventListener('click', () => {
@@ -651,7 +653,7 @@ function startSpellingGame() {
     spellingInput.focus();
 
     // Play Audio
-    chrome.runtime.sendMessage({ action: 'speak', word: currentSpellingTarget });
+    playAudioWithFallback(currentSpellingTarget);
 }
 
 function checkSpelling() {
@@ -697,4 +699,155 @@ function checkSpelling() {
 function updateSpellingStats() {
     document.getElementById('spelling-score').innerText = `Score: ${spellingScore}`;
     document.getElementById('spelling-streak').innerText = `Streak: 🔥${spellingStreak}`;
+}
+
+// --- Audio Helper ---
+function playAudioWithFallback(word, btnElement = null) {
+    let originalIcon = '';
+    let restoreIcon = () => {};
+
+    if (btnElement) {
+        originalIcon = btnElement.innerHTML;
+        // Simple spinner svg
+        btnElement.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="wc-spin"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"></path></svg>`;
+        restoreIcon = () => { btnElement.innerHTML = originalIcon; };
+    }
+
+    const fallbackToLocal = () => {
+        chrome.runtime.sendMessage({ action: 'speak', word: word });
+        if (btnElement) restoreIcon();
+    };
+
+    // Try Youdao TTS (Tier 2)
+    // Note: Use type=2 for US English
+    const youdaoUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`;
+    const audio = new Audio(youdaoUrl);
+    
+    // Timeout mechanism (1.5s)
+    const timeoutId = setTimeout(() => {
+        // If it hasn't started playing, cancel and fallback
+        fallbackToLocal();
+    }, 1500);
+
+    audio.onplay = () => {
+        clearTimeout(timeoutId);
+        if (btnElement) restoreIcon();
+    };
+
+    audio.onerror = () => {
+        clearTimeout(timeoutId);
+        fallbackToLocal();
+    };
+
+    audio.play().catch(err => {
+        clearTimeout(timeoutId);
+        fallbackToLocal();
+    });
+}
+
+// --- Settings Logic ---
+function setupSettings() {
+    const providerSelect = document.getElementById('provider-select');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', (e) => {
+            switchProviderUI(e.target.value);
+        });
+    }
+
+    document.getElementById('save-settings').addEventListener('click', saveSettings);
+}
+
+function loadSettingsUI() {
+    chrome.storage.local.get(['apiSettings'], (result) => {
+        const settings = result.apiSettings || { provider: 'openai', openai: {}, youdao: {}, deepl: {} };
+        
+        const providerSelect = document.getElementById('provider-select');
+        if (providerSelect) {
+            providerSelect.value = settings.provider || 'openai';
+            switchProviderUI(providerSelect.value);
+        }
+
+        // OpenAI
+        if (settings.openai) {
+            document.getElementById('openai-key').value = settings.openai.key || '';
+            document.getElementById('openai-model').value = settings.openai.model || 'gpt-3.5-turbo';
+            document.getElementById('openai-host').value = settings.openai.host || '';
+        }
+
+        // Youdao
+        if (settings.youdao) {
+            document.getElementById('youdao-appid').value = settings.youdao.appId || '';
+            document.getElementById('youdao-secret').value = settings.youdao.appSecret || '';
+        }
+
+        // DeepL
+        if (settings.deepl) {
+            document.getElementById('deepl-key').value = settings.deepl.key || '';
+            document.getElementById('deepl-type').value = settings.deepl.type || 'free';
+        }
+    });
+}
+
+function saveSettings() {
+    const provider = document.getElementById('provider-select')?.value || 'openai';
+    
+    const settings = {
+        provider: provider,
+        openai: {
+            key: document.getElementById('openai-key').value.trim(),
+            model: document.getElementById('openai-model').value.trim(),
+            host: document.getElementById('openai-host').value.trim()
+        },
+        youdao: {
+            appId: document.getElementById('youdao-appid').value.trim(),
+            appSecret: document.getElementById('youdao-secret').value.trim()
+        },
+        deepl: {
+            key: document.getElementById('deepl-key').value.trim(),
+            type: document.getElementById('deepl-type').value
+        }
+    };
+
+    const validation = validateSettings(settings);
+    if (!validation.ok) {
+        showToast(validation.message, 'error');
+        return;
+    }
+
+    chrome.storage.local.set({ apiSettings: settings }, () => {
+        showToast('已保存，立即生效', 'success');
+    });
+}
+
+function switchProviderUI(provider) {
+    document.querySelectorAll('.config-section').forEach(el => el.style.display = 'none');
+    const target = document.getElementById(`config-${provider}`);
+    if (target) target.style.display = 'block';
+}
+
+function showToast(message, type) {
+    const toast = document.getElementById('save-toast');
+    const text = document.getElementById('toast-text');
+    if (!toast || !text) return;
+    text.innerText = message;
+    toast.classList.remove('success', 'error');
+    toast.classList.add(type);
+    toast.classList.add('show');
+    setTimeout(() => { toast.classList.remove('show'); }, 3000);
+}
+
+function validateSettings(settings) {
+    if (settings.provider === 'openai') {
+        if (!settings.openai.key) return { ok: false, message: '请填写 OpenAI API Key' };
+        return { ok: true };
+    }
+    if (settings.provider === 'deepl') {
+        if (!settings.deepl.key) return { ok: false, message: '请填写 DeepL Authentication Key' };
+        return { ok: true };
+    }
+    if (settings.provider === 'youdao') {
+        if (!settings.youdao.appId || !settings.youdao.appSecret) return { ok: false, message: '请填写有道 AppID 与 App Secret' };
+        return { ok: true };
+    }
+    return { ok: false, message: '请选择服务商' };
 }
