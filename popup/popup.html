@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Collector Popup</title>
+    <link rel="stylesheet" href="popup.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="popup-container">
+        <header class="header">
+            <div class="brand">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                </svg>
+                <span>Word Collector</span>
+            </div>
+        </header>
+
+        <section class="stats-card">
+            <div class="stat-item">
+                <span class="stat-label">今日收集 Today</span>
+                <span class="stat-value" id="today-count">0</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+                <span class="stat-label">总词库 Total</span>
+                <span class="stat-value" id="total-count">0</span>
+            </div>
+        </section>
+
+        <section class="action-grid">
+            <button id="open-library" class="action-btn primary">
+                <div class="icon-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <rect x="3" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="3" width="7" height="7"></rect>
+                        <rect x="14" y="14" width="7" height="7"></rect>
+                        <rect x="3" y="14" width="7" height="7"></rect>
+                    </svg>
+                </div>
+                <span>词库管理<br><small>Library</small></span>
+            </button>
+            <button id="open-study" class="action-btn secondary">
+                <div class="icon-box">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </div>
+                <span>复习模式<br><small>Study</small></span>
+            </button>
+        </section>
+
+        <footer class="footer">
+            <p>Keep collecting, keep learning.</p>
+        </footer>
+    </div>
+    <script src="popup.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Collector Pro | 词霸</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="brand">
+                <div class="brand-logo">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                    </svg>
+                </div>
+                <span class="brand-name">Word Collector</span>
+            </div>
+        </div>
+
+        <nav class="nav-menu">
+            <a href="#" class="nav-link active" data-view="vocabulary">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                我的库 / Library
+            </a>
+            <a href="#" class="nav-link" data-view="study">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                复习模式 / Study
+            </a>
+            <a href="#" class="nav-link" data-view="sentences">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                </svg>
+                精选句子 / Sentences <span id="count-sentences"
+                    style="font-size: 11px; opacity: 0.6; margin-left: auto;">(0)</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <button id="export-json" class="btn-outline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Backup JSON
+            </button>
+            <button id="export-csv" class="btn-outline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                Export CSV (Excel/Anki)
+            </button>
+        </div>
+    </aside>
+
+    <main class="main-stage">
+        <header class="top-nav">
+            <div class="search-box">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="word-search" placeholder="搜索已选单词或中文解释...">
+            </div>
+        </header>
+
+        <section class="scroll-area">
+            <!-- Vocabulary View -->
+            <div class="view-section" id="view-vocabulary">
+                <div class="mastery-tabs">
+                    <button class="tab-btn active" data-status="learning">
+                        正在学习 / Learning <span id="count-learning">(0)</span>
+                    </button>
+                    <button class="tab-btn" data-status="mastered">
+                        已掌握 / Mastered <span id="count-mastered">(0)</span>
+                    </button>
+                </div>
+
+                <div class="list-container">
+                    <div class="list-header">
+                        <span style="flex: 2;">WORD / 单词</span>
+                        <span style="flex: 1;">PRON / 发音</span>
+                        <span style="flex: 1.5;">IPA / 读音</span>
+                        <span style="flex: 4;">CHINESE MEANING / 中文释义</span>
+                        <span style="flex: 2;">TIMESTAMP / 收集时间</span>
+                        <span style="width: 100px; text-align: right;">ACTION</span>
+                    </div>
+                    <div id="word-list-compact" class="word-list-compact">
+                        <!-- Rows will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Activity Heatmap -->
+                <div class="heatmap-section">
+                    <h3 class="section-title">Collection Activity / 收集热力图</h3>
+                    <div id="activity-heatmap" class="heatmap-grid"></div>
+                </div>
+            </div>
+
+            <!-- Study Mode View -->
+            <div class="view-section" id="view-study" style="display: none;">
+                <div class="section-header">
+                    <h1>Active Recall / 主动复习</h1>
+                    <div class="study-mode-switch">
+                        <button class="mode-btn active" data-mode="flashcard">Flashcards</button>
+                        <button class="mode-btn" data-mode="quiz">Quiz Game 🎮</button>
+                        <button class="mode-btn" data-mode="spelling">Spelling ⌨️</button>
+                    </div>
+                </div>
+
+                <!-- Flashcard Container -->
+                <div id="study-flashcard-container" class="study-container">
+                    <div class="flashcard-wrap">
+                        <div class="card-container" id="study-card">
+                            <div class="card-inner">
+                                <div class="face face-front">
+                                    <h2 id="study-word">Ready?</h2>
+                                    <p style="margin-top: 20px; color: var(--text-dim);">点击翻转 / Click to Flip</p>
+                                </div>
+                                <div class="face face-back">
+                                    <p id="study-def" style="text-align: center; font-size: 18px; line-height: 1.6;">
+                                        点击“下一个”开始复习。</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="text-align: center;">
+                            <button id="study-next" class="btn-hero">下一个 / Next Word</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quiz Container -->
+                <div id="study-quiz-container" class="study-container" style="display: none;">
+                    <div class="quiz-wrap">
+                        <div class="quiz-progress">
+                            <span id="quiz-score">Score: 0</span>
+                            <span id="quiz-streak">Streak: 🔥0</span>
+                        </div>
+
+                        <div class="quiz-card">
+                            <div class="quiz-audio-hint">
+                                <button id="quiz-play-audio" class="btn-audio-large">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <h2 id="quiz-question-word">Loading...</h2>
+                            <div id="quiz-feedback" class="quiz-feedback"></div>
+                        </div>
+
+                        <div id="quiz-options" class="quiz-options-grid">
+                            <!-- Options injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Spelling Container -->
+                <div id="study-spelling-container" class="study-container" style="display: none;">
+                    <div class="spelling-wrap">
+                        <div class="spelling-card">
+                            <div class="spelling-hint-cn" id="spelling-def-cn">Loading...</div>
+                            <div class="spelling-audio-hint">
+                                <button id="spelling-play-audio" class="btn-audio-large">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                        stroke-width="2">
+                                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="spelling-input-area">
+                                <input type="text" id="spelling-input" placeholder="Type the word..." autocomplete="off"
+                                    spellcheck="false">
+                                <div id="spelling-feedback" class="spelling-feedback"></div>
+                            </div>
+                            <div id="spelling-result-word" class="spelling-result-word" style="display: none;"></div>
+                        </div>
+                        <div class="quiz-progress" style="margin-top: 20px;">
+                            <span id="spelling-score">Score: 0</span>
+                            <span id="spelling-streak">Streak: 🔥0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sentences View -->
+            <div class="view-section" id="view-sentences" style="display: none;">
+                <div class="section-header">
+                    <h1>Favorite Sentences / 精选句库</h1>
+                    <p style="color: var(--text-dim); font-size: 14px; margin-top: 4px;">收录您在阅读中标记的长难句与经典表达。</p>
+                </div>
+
+                <div id="sentences-grid" class="sentences-grid">
+                    <!-- Sentence cards will be injected here -->
+                </div>
+            </div>
+        </section>
+    </main>
+    <script src="options.js"></script>
+</body>
+
+</html>

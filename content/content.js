@@ -1,0 +1,381 @@
+// content.js
+
+let selectedText = '';
+let popup = null;
+let currentAudio = null;
+
+// Initialize: highlight existing words on load
+function initHighlighting() {
+    chrome.storage.local.get(['collectedWords'], (result) => {
+        if (result.collectedWords) {
+            highlightWordsOnPage(result.collectedWords);
+        }
+    });
+}
+
+// Ensure DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initHighlighting);
+} else {
+    initHighlighting();
+}
+
+// Observe dynamic content changes (SPA support)
+const observer = new MutationObserver((mutations) => {
+    let shouldUpdate = false;
+    for (const mutation of mutations) {
+        if (mutation.addedNodes.length > 0) {
+            shouldUpdate = true;
+            break;
+        }
+    }
+    // Debounce the update
+    if (shouldUpdate) {
+        clearTimeout(window._highlightTimeout);
+        window._highlightTimeout = setTimeout(initHighlighting, 1000);
+    }
+});
+
+observer.observe(document.body, {
+    childList: true,
+    subtree: true
+});
+
+// Use capture to potentially catch events before other listeners
+document.addEventListener('mouseup', handleMouseUp);
+
+function handleMouseUp(event) {
+    if (popup && popup.contains(event.target)) {
+        event.stopPropagation();
+        return;
+    }
+
+    const selection = window.getSelection().toString().trim();
+
+    // Minimum 2 chars, maximum 1000 for sanity
+    if (selection && selection.length >= 2 && selection.length <= 1000) {
+        selectedText = selection;
+
+        // Context Capture: Try to get the surrounding sentence
+        let contextSentence = '';
+        try {
+            const anchorNode = window.getSelection().anchorNode;
+            if (anchorNode && anchorNode.parentElement) {
+                const fullText = anchorNode.parentElement.innerText || anchorNode.textContent;
+                // Simple sentence splitter: match sentence containing the selection
+                // Split by . ! ? but keep delimiters. 
+                const sentences = fullText.match(/[^\.!\?]+[\.!\?]+/g) || [fullText];
+                contextSentence = sentences.find(s => s.includes(selectedText)) || fullText;
+                contextSentence = contextSentence.trim();
+                // Limit context length
+                if (contextSentence.length > 300) contextSentence = contextSentence.substring(0, 300) + '...';
+            }
+        } catch (e) {
+            console.log("Context capture failed", e);
+        }
+
+        showPopup(event.pageX, event.pageY, selectedText, contextSentence);
+    } else {
+        removePopup();
+    }
+}
+
+async function showPopup(x, y, text, context = '') {
+    if (popup && popup.getAttribute('data-text') === text) return;
+    removePopup();
+
+    const isSingleWord = !text.includes(' ') && text.length < 30;
+
+    popup = document.createElement('div');
+    popup.className = 'wc-popup-container';
+    if (isSingleWord) popup.classList.add('wc-single-word');
+    popup.setAttribute('data-text', text);
+
+    const viewportWidth = window.innerWidth;
+    const popupWidth = 320;
+    let left = x;
+    if (x + popupWidth > viewportWidth) left = viewportWidth - popupWidth - 20;
+
+    popup.style.left = `${left}px`;
+    popup.style.top = `${y + 15}px`;
+    popup.innerHTML = `<div style="text-align:center; padding: 20px; color: #6b7280;">正在解析 / Translating...</div>`;
+
+    popup.addEventListener('mouseup', (e) => e.stopPropagation());
+    popup.addEventListener('mousedown', (e) => e.stopPropagation());
+    document.body.appendChild(popup);
+
+    try {
+        let engData = null;
+        let chineseTranslation = '';
+        let phonetic = '';
+        let meaningsHtml = '';
+
+        if (isSingleWord) {
+            const word = text.toLowerCase().replace(/[^a-z-]/g, '');
+            // Delegate to background script
+            const result = await new Promise(resolve => {
+                chrome.runtime.sendMessage({ action: 'lookupWord', word: word }, (response) => {
+                    resolve(response || {});
+                });
+            });
+
+            if (result.error) console.warn("Lookup warning:", result.error);
+
+            engData = result.engData;
+            chineseTranslation = result.chinese;
+
+            if (engData) {
+                phonetic = engData.phonetic || (engData.phonetics && engData.phonetics.find(p => p.text)?.text) || '';
+                if (engData.meanings) {
+                    engData.meanings.slice(0, 2).forEach(m => {
+                        const def = m.definitions[0] || { definition: 'No definition' };
+                        meaningsHtml += `
+                            <div class="wc-meaning-block">
+                                <span class="wc-pos">${m.partOfSpeech}</span>
+                                <div class="wc-definition">${def.definition}</div>
+                            </div>
+                        `;
+                    });
+                }
+            }
+        } else {
+            // Delegate sentence translation
+            const result = await new Promise(resolve => {
+                chrome.runtime.sendMessage({ action: 'translateText', text: text }, (response) => {
+                    resolve(response || {});
+                });
+            });
+
+            if (result.error) throw new Error(result.error);
+
+            chineseTranslation = result.translation;
+            if (chineseTranslation) {
+                meaningsHtml = `
+                    <div class="wc-sentence-translation">${chineseTranslation}</div>
+                    <div class="wc-sentence-original">${text}</div>
+                `;
+            }
+        }
+
+        if (!chineseTranslation && !meaningsHtml) throw new Error('Not found');
+
+        // Format Chinese Definition: Translate abbreviations
+        if (chineseTranslation && isSingleWord) {
+            chineseTranslation = formatChineseDefinition(chineseTranslation);
+        }
+
+        const storage = await chrome.storage.local.get(['collectedWords']);
+        const collectedWords = storage.collectedWords || {};
+        const storedItem = collectedWords[text.toLowerCase()];
+        const isCollected = !!storedItem;
+        const isMastered = storedItem && storedItem.mastered;
+
+        popup.innerHTML = `
+            <div class="wc-header">
+                <div class="wc-word-info">
+                    <h2 class="wc-word-text">${isSingleWord ? text : '句子翻译 / Sentence'}</h2>
+                    ${isSingleWord ? `
+                    <div class="wc-phonetic-row">
+                        <span class="wc-phonetic-text">${phonetic}</span>
+                        <button class="wc-audio-btn" id="wc-play-audio" title="播放发音">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                        </button>
+                    </div>` : `
+                    <button class="wc-audio-btn" id="wc-play-audio" title="播放全文">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                    </button>
+                    `}
+                </div>
+                <button id="wc-heart-btn" class="wc-heart-btn ${isCollected ? 'active' : ''}" title="${isCollected ? '已收藏' : '加入词库'}">
+                    <svg class="heart-icon" viewBox="0 0 24 24" fill="${isCollected ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
+                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="wc-content-scroll">
+                ${meaningsHtml}
+                ${(isSingleWord && chineseTranslation) ? `
+                    <div class="wc-meaning-block" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(0,0,0,0.1);">
+                        <div class="wc-pos" style="background:#dbeafe; color:#1e40af;">中文</div>
+                        <div class="wc-definition" style="font-weight: 600; color:#1e3a8a;">${chineseTranslation}</div>
+                    </div>` : ''}
+            </div>
+            <div id="wc-status-container">
+                ${isCollected ? `<div class="wc-status"><span class="wc-dot"></span> ${isMastered ? '已归档' : '已收藏'}</div>` : ''}
+            </div>
+        `;
+
+        document.getElementById('wc-play-audio').addEventListener('click', (e) => {
+            e.stopPropagation();
+            chrome.runtime.sendMessage({ action: 'speak', word: text });
+        });
+
+        const heartBtn = document.getElementById('wc-heart-btn');
+        heartBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+
+            // Animation
+            heartBtn.classList.add('active');
+            const svg = heartBtn.querySelector('svg');
+            svg.setAttribute('fill', 'currentColor');
+
+            const def = isSingleWord ? (engData?.meanings[0].definitions[0].definition || '') : text;
+            await saveWord(text, def, engData || {}, chineseTranslation, isSingleWord, context);
+
+            // Update status text
+            const statusContainer = document.getElementById('wc-status-container');
+            statusContainer.innerHTML = `<div class="wc-status"><span class="wc-dot"></span> 已收藏</div>`;
+
+            // Optional: Shake effect if already saved? No, just keep as "Saved" state.
+        });
+
+        // Click outside to close is handled by global listener (if implemented) or we rely on user clicking away.
+        // But previously there was a global click listener to close it? 
+        // Let's check handleMouseUp or similar. 
+        // Yes, handleMouseUp calls removePopup() if clicking outside.
+    } catch (error) {
+        console.error("Translation Error:", error);
+        popup.innerHTML = `
+            <div class="wc-word-text">解析失败</div>
+            <div style="margin: 12px 0; font-size: 14px; color: #6b7280;">暂时无法翻译此段内容，请检查网络。</div>
+        `;
+        // No buttons to listen to here either, or maybe keep close button for error?
+        // User asked to remove buttons. Auto-close is safer.
+        setTimeout(() => {
+            // Optional: Auto close on error after delay? 
+        }, 3000);
+    }
+}
+
+function removePopup() {
+    if (popup) {
+        popup.remove();
+        popup = null;
+    }
+}
+
+async function saveWord(text, definition, fullData, chineseTranslation, isSingleWord, context) {
+    const key = text.toLowerCase();
+    const result = await chrome.storage.local.get(['collectedWords']);
+    const words = result.collectedWords || {};
+
+    if (!words[key]) {
+        words[key] = {
+            definition,
+            chinese: chineseTranslation || '',
+            phonetic: isSingleWord ? ((fullData && fullData.phonetic) || (fullData && fullData.phonetics && fullData.phonetics.find(p => p.text)?.text) || '') : '',
+            context: context || '',
+            addedAt: Date.now(),
+            mastered: false,
+            isSentence: !isSingleWord,
+            count: 1
+        };
+
+        await chrome.storage.local.set({ collectedWords: words });
+
+        const btn = document.getElementById('wc-collect-btn');
+        if (btn) {
+            btn.innerText = '已在库中';
+            btn.disabled = true;
+            btn.style.background = '#059669';
+        }
+
+        const statusContainer = document.getElementById('wc-status-container');
+        if (statusContainer) {
+            statusContainer.innerHTML = '<div class="wc-status"><span class="wc-dot"></span> 已收藏</div>';
+        }
+
+        if (isSingleWord) {
+            highlightWordsOnPage({ [key]: words[key] });
+        }
+    }
+}
+
+function highlightWordsOnPage(wordsMap) {
+    // Only highlight single words for performance and clarity
+    const wordsToHighlight = Object.keys(wordsMap).filter(k => !wordsMap[k].isSentence && !k.includes(' '));
+    if (wordsToHighlight.length === 0) return;
+
+    const sortedWords = wordsToHighlight.sort((a, b) => b.length - a.length);
+    const regex = new RegExp(`\\b(${sortedWords.join('|')})\\b`, 'gi');
+
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    const textNodes = [];
+    let node;
+    while (node = walker.nextNode()) {
+        const parent = node.parentElement;
+        if (!parent) continue;
+        if (['script', 'style', 'textarea', 'input', 'code', 'noscript'].includes(parent.tagName.toLowerCase())) continue;
+        if (parent.closest('.wc-popup-container') || parent.classList.contains('wc-highlighted-word')) continue;
+        textNodes.push(node);
+    }
+
+    textNodes.forEach(textNode => {
+        const text = textNode.nodeValue;
+        if (!textNode.parentNode) return;
+
+        if (regex.test(text)) {
+            const fragment = document.createDocumentFragment();
+            let lastIndex = 0;
+            let match;
+
+            regex.lastIndex = 0;
+            while ((match = regex.exec(text)) !== null) {
+                fragment.appendChild(document.createTextNode(text.substring(lastIndex, match.index)));
+                const span = document.createElement('span');
+                const matchedWord = match[0].toLowerCase();
+                const wordData = wordsMap[matchedWord];
+
+                span.className = 'wc-highlighted-word' + (wordData?.mastered ? ' wc-mastered' : '');
+                span.title = wordData?.chinese || wordData?.definition || '';
+                span.textContent = match[0];
+
+                fragment.appendChild(span);
+                lastIndex = regex.lastIndex;
+            }
+            fragment.appendChild(document.createTextNode(text.substring(lastIndex)));
+
+            if (textNode.parentNode) {
+                textNode.parentNode.replaceChild(fragment, textNode);
+            }
+        }
+    });
+}
+
+function formatChineseDefinition(text) {
+    if (!text) return '';
+    const map = {
+        'n\\.': '名词',
+        'v\\.': '动词',
+        'adj\\.': '形容词',
+        'adv\\.': '副词',
+        'prep\\.': '介词',
+        'conj\\.': '连词',
+        'pron\\.': '代词',
+        'art\\.': '冠词',
+        'num\\.': '数词',
+        'int\\.': '感叹词',
+        'vt\\.': '及物动词',
+        'vi\\.': '不及物动词',
+        'aux\\.': '助动词',
+        'pl\\.': '复数',
+        'sing\\.': '单数',
+        'pref\\.': '前缀',
+        'suff\\.': '后缀',
+        'web\\.': '网络',
+        'abbr\\.': '缩写'
+    };
+
+    let formatted = text;
+    for (const [key, value] of Object.entries(map)) {
+        formatted = formatted.replace(new RegExp(key, 'gi'), `${value} `);
+    }
+    return formatted;
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.collectedWords) {
+        const newWords = changes.collectedWords.newValue || {};
+        highlightWordsOnPage(newWords);
+    }
+});
