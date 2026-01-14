@@ -4,6 +4,7 @@ let allWords = {};
 let studyQueue = [];
 let currentCardIndex = -1;
 let currentMasteryTab = 'learning'; // 'learning' or 'mastered'
+let currentAudio = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
@@ -24,26 +25,30 @@ async function initializeApp() {
 }
 
 async function fetchWords() {
-    // The chrome.storage.local.get API can be used with a callback or as a Promise.
-    // If using a callback, 'await' should not be used directly on it.
-    // Assuming the intent is to use the callback style as provided in the instruction.
-    chrome.storage.local.get(['collectedWords', 'masteryState'], (result) => {
-        allWords = result.collectedWords || {};
-        const masteryState = result.masteryState || {};
-
-        // Merge mastery state
-        Object.entries(masteryState).forEach(([word, isMastered]) => {
-            if (allWords[word]) {
-                allWords[word].mastered = isMastered;
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['collectedWords'], (result) => {
+            allWords = result.collectedWords || {};
+            const migrated = migrateCollectedWords(allWords);
+            if (migrated.changed) {
+                allWords = migrated.words;
+                chrome.storage.local.set({ collectedWords: allWords }, () => {
+                    updateCounts();
+                    const activeView = document.querySelector('.nav-link.active')?.getAttribute('data-view');
+                    if (activeView === 'vocabulary') renderWordList();
+                    if (activeView === 'sentences') renderSentencesGrid();
+                    initHeatmap();
+                    resolve();
+                });
+                return;
             }
-        });
 
-        // Initialize UI
-        updateCounts();
-        const activeView = document.querySelector('.nav-link.active')?.getAttribute('data-view');
-        if (activeView === 'vocabulary') renderWordList();
-        if (activeView === 'sentences') renderSentencesGrid();
-        initHeatmap(); // Render Heatmap
+            updateCounts();
+            const activeView = document.querySelector('.nav-link.active')?.getAttribute('data-view');
+            if (activeView === 'vocabulary') renderWordList();
+            if (activeView === 'sentences') renderSentencesGrid();
+            initHeatmap();
+            resolve();
+        });
     });
 }
 
@@ -72,6 +77,19 @@ function setupNavigation() {
         });
     });
 }
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (!changes.collectedWords) return;
+
+    allWords = changes.collectedWords.newValue || {};
+    updateCounts();
+
+    const activeView = document.querySelector('.nav-link.active')?.getAttribute('data-view');
+    if (activeView === 'vocabulary') renderWordList(document.getElementById('word-search')?.value?.toLowerCase() || '');
+    if (activeView === 'sentences') renderSentencesGrid();
+    initHeatmap();
+});
 
 function setupSearch() {
     const searchInput = document.getElementById('word-search');
@@ -108,12 +126,13 @@ function setupExport() {
         let csvContent = "\uFEFFWord,Definition,Translation,Phonetic,Context,AddedAt\n";
 
         Object.entries(allWords).forEach(([word, data]) => {
+            const displayWord = (data && data.originalText) ? data.originalText : word;
             const def = (data.definition || '').replace(/"/g, '""');
             const cn = (data.chinese || '').replace(/"/g, '""');
             const ctx = (data.context || '').replace(/"/g, '""');
             const added = formatPreciseDate(data.addedAt);
 
-            csvContent += `"${word}","${def}","${cn}","${data.phonetic || ''}","${ctx}","${added}"\n`;
+            csvContent += `"${displayWord.replace(/"/g, '""')}","${def}","${cn}","${(data.phonetic || '').replace(/"/g, '""')}","${ctx}","${added}"\n`;
         });
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -264,6 +283,7 @@ function renderWordList(filter = '') {
         const row = document.createElement('div');
         row.className = 'word-row-compact';
 
+        const displayWord = (data && data.originalText) ? data.originalText : word;
         const timeStr = formatPreciseDate(data.addedAt);
         const masteryActionLabel = data.mastered ? '移回生词本' : '掌握归档';
         const masteryClass = data.mastered ? 'is-mastered' : '';
@@ -271,21 +291,21 @@ function renderWordList(filter = '') {
         const contextTooltip = data.context ? `\n\nContext:\n${data.context}` : '';
 
         row.innerHTML = `
-            <div class="cell-word" title="${word}${contextTooltip}">
+            <div class="cell-word" title="${escapeAttr(`${displayWord}${contextTooltip}`)}">
                 ${isSentence ? `<span class="badge-sentence">句子</span>` : ''}
-                ${word}
+                ${escapeHtml(displayWord)}
             </div>
             <div class="cell-pron">
-                <button class="btn-audio-mini" data-word="${word}" title="${isSentence ? '播放全文' : '播放发音'}">
+                <button class="btn-audio-mini" data-word="${escapeAttr(word)}" title="${isSentence ? '播放全文' : '播放发音'}">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
                 </button>
             </div>
-            <div class="cell-phonetic">${isSentence ? '-' : (data.phonetic || '/.../')}</div>
-            <div class="cell-meaning" title="${data.chinese || data.definition}">${data.chinese || data.definition}</div>
-            <div class="cell-date">${timeStr}</div>
+            <div class="cell-phonetic">${escapeHtml(isSentence ? '-' : (data.phonetic || '/.../'))}</div>
+            <div class="cell-meaning" title="${escapeAttr(data.chinese || data.definition || '')}">${escapeHtml(data.chinese || data.definition || '')}</div>
+            <div class="cell-date">${escapeHtml(timeStr)}</div>
             <div class="cell-action">
-                <button class="btn-status ${masteryClass}" data-word="${word}">
-                    ${masteryActionLabel}
+                <button class="btn-status ${masteryClass}" data-word="${escapeAttr(word)}">
+                    ${escapeHtml(masteryActionLabel)}
                 </button>
             </div>
         `;
@@ -487,6 +507,7 @@ function startQuizGame() {
     options.forEach(word => {
         const btn = document.createElement('div');
         btn.className = 'quiz-option-btn';
+        btn.dataset.word = word;
         // Show Chinese as options
         const meaning = allWords[word].chinese || allWords[word].definition || 'No definition';
         // Truncate if too long
@@ -517,20 +538,9 @@ function checkQuizAnswer(selectedWord, btnElement) {
         document.getElementById('quiz-feedback').innerText = "Oops! Try again.";
         document.getElementById('quiz-feedback').style.color = "#ef4444";
 
-        // Highlight correct one
         allBtns.forEach(btn => {
-            const btnText = btn.innerText;
-            const targetMeaning = allWords[currentQuizTarget].chinese || allWords[currentQuizTarget].definition;
-            if (btnText.includes(targetMeaning.substring(0, 10))) {
-                // Weak check, but since we render that text... prefer data attribute check
-            }
+            if (btn.dataset.word === currentQuizTarget) btn.classList.add('correct');
         });
-
-        // Better way: identify correct button by index? No, we didn't save it. 
-        // Let's just find the button that corresponds to the target.
-        // Actually, let's keep it simple: just show correct answer in feedback?
-        // Or find the button:
-        // We really should attach the word to the button dataset to be sure.
     }
 
     updateQuizStats();
@@ -571,12 +581,13 @@ function renderSentencesGrid() {
         card.className = 'sentence-card';
 
         const timeStr = formatPreciseDate(data.addedAt);
+        const originalText = (data && data.originalText) ? data.originalText : text;
 
         card.innerHTML = `
-            <div class="en">${text}</div>
-            <div class="cn">${data.chinese || '暂无翻译'}</div>
+            <div class="en">${escapeHtml(originalText)}</div>
+            <div class="cn">${escapeHtml(data.chinese || '暂无翻译')}</div>
             <div class="meta">
-                <div class="date">${timeStr}</div>
+                <div class="date">${escapeHtml(timeStr)}</div>
                 <div class="sentence-card-actions">
                     <button class="btn-icon-sm speak-btn" title="朗读">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
@@ -593,11 +604,11 @@ function renderSentencesGrid() {
 
         // Event Listeners
         card.querySelector('.speak-btn').addEventListener('click', (e) => {
-            playAudioWithFallback(text, e.currentTarget);
+            playAudioWithFallback(originalText, e.currentTarget);
         });
 
         card.querySelector('.copy-btn').addEventListener('click', () => {
-            navigator.clipboard.writeText(text).then(() => {
+            navigator.clipboard.writeText(originalText).then(() => {
                 const icon = card.querySelector('.copy-btn');
                 const originalHtml = icon.innerHTML;
                 icon.innerHTML = '<span style="font-size:10px;">Done</span>';
@@ -722,6 +733,8 @@ function playAudioWithFallback(word, btnElement = null) {
     // Note: Use type=2 for US English
     const youdaoUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(word)}&type=2`;
     const audio = new Audio(youdaoUrl);
+    stopCurrentAudio();
+    currentAudio = audio;
     
     // Timeout mechanism (1.5s)
     const timeoutId = setTimeout(() => {
@@ -745,6 +758,17 @@ function playAudioWithFallback(word, btnElement = null) {
     });
 }
 
+function stopCurrentAudio() {
+    if (!currentAudio) return;
+    try {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+    } catch {
+    } finally {
+        currentAudio = null;
+    }
+}
+
 // --- Settings Logic ---
 function setupSettings() {
     const providerSelect = document.getElementById('provider-select');
@@ -759,11 +783,11 @@ function setupSettings() {
 
 function loadSettingsUI() {
     chrome.storage.local.get(['apiSettings'], (result) => {
-        const settings = result.apiSettings || { provider: 'openai', openai: {}, youdao: {}, deepl: {} };
+        const settings = result.apiSettings || { provider: 'default', openai: {}, youdao: {}, deepl: {} };
         
         const providerSelect = document.getElementById('provider-select');
         if (providerSelect) {
-            providerSelect.value = settings.provider || 'openai';
+            providerSelect.value = settings.provider || 'default';
             switchProviderUI(providerSelect.value);
         }
 
@@ -788,8 +812,8 @@ function loadSettingsUI() {
     });
 }
 
-function saveSettings() {
-    const provider = document.getElementById('provider-select')?.value || 'openai';
+async function saveSettings() {
+    const provider = document.getElementById('provider-select')?.value || 'default';
     
     const settings = {
         provider: provider,
@@ -811,6 +835,12 @@ function saveSettings() {
     const validation = validateSettings(settings);
     if (!validation.ok) {
         showToast(validation.message, 'error');
+        return;
+    }
+
+    const permissionOk = await ensureProviderPermissions(settings);
+    if (!permissionOk) {
+        showToast('需要授权访问该 Host 才能请求接口', 'error');
         return;
     }
 
@@ -837,8 +867,12 @@ function showToast(message, type) {
 }
 
 function validateSettings(settings) {
+    if (settings.provider === 'default') {
+        return { ok: true };
+    }
     if (settings.provider === 'openai') {
         if (!settings.openai.key) return { ok: false, message: '请填写 OpenAI API Key' };
+        if (settings.openai.host && !isValidHttpsHost(settings.openai.host)) return { ok: false, message: 'OpenAI Host 必须为 https:// 域名或完整 https URL' };
         return { ok: true };
     }
     if (settings.provider === 'deepl') {
@@ -850,4 +884,81 @@ function validateSettings(settings) {
         return { ok: true };
     }
     return { ok: false, message: '请选择服务商' };
+}
+
+function escapeHtml(value) {
+    const str = String(value ?? '');
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeAttr(value) {
+    return escapeHtml(value).replace(/\n/g, '&#10;').replace(/\r/g, '&#13;');
+}
+
+function isValidHttpsHost(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return true;
+    try {
+        const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+        return url.protocol === 'https:' && !!url.host;
+    } catch {
+        return false;
+    }
+}
+
+function migrateCollectedWords(words) {
+    let changed = false;
+    const next = {};
+
+    Object.entries(words || {}).forEach(([key, value]) => {
+        const data = (value && typeof value === 'object') ? { ...value } : {};
+        if (!data.originalText) {
+            data.originalText = key;
+            changed = true;
+        }
+        next[key] = data;
+    });
+
+    return { changed, words: next };
+}
+
+async function ensureProviderPermissions(settings) {
+    if (settings.provider !== 'openai') return true;
+    const rawHost = String(settings.openai?.host ?? '').trim();
+    if (!rawHost) return true;
+
+    const originPattern = toHttpsOriginPattern(rawHost);
+    if (!originPattern) return false;
+    if (originPattern.startsWith('https://api.openai.com/')) return true;
+
+    const has = await containsOrigins([originPattern]);
+    if (has) return true;
+    return requestOrigins([originPattern]);
+}
+
+function toHttpsOriginPattern(value) {
+    try {
+        const url = new URL(String(value).includes('://') ? String(value) : `https://${value}`);
+        if (url.protocol !== 'https:') return '';
+        return `${url.origin}/*`;
+    } catch {
+        return '';
+    }
+}
+
+function requestOrigins(origins) {
+    return new Promise((resolve) => {
+        chrome.permissions.request({ origins }, (granted) => resolve(!!granted));
+    });
+}
+
+function containsOrigins(origins) {
+    return new Promise((resolve) => {
+        chrome.permissions.contains({ origins }, (result) => resolve(!!result));
+    });
 }

@@ -3,12 +3,15 @@
 let selectedText = '';
 let popup = null;
 let currentAudio = null;
+let highlightTimeoutId = null;
+let lastHighlightState = new Map();
 
 // Initialize: highlight existing words on load
 function initHighlighting() {
     chrome.storage.local.get(['collectedWords'], (result) => {
         if (result.collectedWords) {
             highlightWordsOnPage(result.collectedWords);
+            lastHighlightState = buildHighlightState(result.collectedWords);
         }
     });
 }
@@ -31,8 +34,8 @@ const observer = new MutationObserver((mutations) => {
     }
     // Debounce the update
     if (shouldUpdate) {
-        clearTimeout(window._highlightTimeout);
-        window._highlightTimeout = setTimeout(initHighlighting, 1000);
+        if (highlightTimeoutId) clearTimeout(highlightTimeoutId);
+        highlightTimeoutId = setTimeout(initHighlighting, 1000);
     }
 });
 
@@ -71,7 +74,6 @@ function handleMouseUp(event) {
                 if (contextSentence.length > 300) contextSentence = contextSentence.substring(0, 300) + '...';
             }
         } catch (e) {
-            console.log("Context capture failed", e);
         }
 
         showPopup(event.pageX, event.pageY, selectedText, contextSentence);
@@ -85,11 +87,16 @@ async function showPopup(x, y, text, context = '') {
     removePopup();
 
     const isSingleWord = !text.includes(' ') && text.length < 30;
+    const normalizedWord = isSingleWord ? text.toLowerCase().replace(/[^a-z-]/g, '') : '';
+    const storageKey = isSingleWord ? normalizedWord : text.toLowerCase();
+    if (isSingleWord && !normalizedWord) return;
 
     popup = document.createElement('div');
     popup.className = 'wc-popup-container';
     if (isSingleWord) popup.classList.add('wc-single-word');
     popup.setAttribute('data-text', text);
+    const requestId = crypto.randomUUID();
+    popup.dataset.requestId = requestId;
 
     const viewportWidth = window.innerWidth;
     const popupWidth = 320;
@@ -113,13 +120,14 @@ async function showPopup(x, y, text, context = '') {
         let audioObj = null;
 
         if (isSingleWord) {
-            const word = text.toLowerCase().replace(/[^a-z-]/g, '');
+            const word = normalizedWord;
             // Delegate to background script
             const result = await new Promise(resolve => {
                 chrome.runtime.sendMessage({ action: 'lookupWord', word: word }, (response) => {
                     resolve(response || {});
                 });
             });
+            if (!popup || popup.getAttribute('data-text') !== text || popup.dataset.requestId !== requestId) return;
 
             if (result.error) console.warn("Lookup warning:", result.error);
 
@@ -146,8 +154,8 @@ async function showPopup(x, y, text, context = '') {
                         const def = m.definitions[0] || { definition: 'No definition' };
                         meaningsHtml += `
                             <div class="wc-meaning-block">
-                                <span class="wc-pos">${m.partOfSpeech}</span>
-                                <div class="wc-definition">${def.definition}</div>
+                                <span class="wc-pos">${escapeHtml(m.partOfSpeech)}</span>
+                                <div class="wc-definition">${escapeHtml(def.definition)}</div>
                             </div>
                         `;
                     });
@@ -160,14 +168,15 @@ async function showPopup(x, y, text, context = '') {
                     resolve(response || {});
                 });
             });
+            if (!popup || popup.getAttribute('data-text') !== text || popup.dataset.requestId !== requestId) return;
 
             if (result.error) throw new Error(result.error);
 
             chineseTranslation = result.translation;
             if (chineseTranslation) {
                 meaningsHtml = `
-                    <div class="wc-sentence-translation">${chineseTranslation}</div>
-                    <div class="wc-sentence-original">${text}</div>
+                    <div class="wc-sentence-translation">${escapeHtml(chineseTranslation)}</div>
+                    <div class="wc-sentence-original">${escapeHtml(text)}</div>
                 `;
             }
         }
@@ -181,17 +190,17 @@ async function showPopup(x, y, text, context = '') {
 
         const storage = await chrome.storage.local.get(['collectedWords']);
         const collectedWords = storage.collectedWords || {};
-        const storedItem = collectedWords[text.toLowerCase()];
+        const storedItem = collectedWords[storageKey];
         const isCollected = !!storedItem;
         const isMastered = storedItem && storedItem.mastered;
 
         popup.innerHTML = `
             <div class="wc-header">
                 <div class="wc-word-info">
-                    <h2 class="wc-word-text">${isSingleWord ? text : '句子翻译 / Sentence'}</h2>
+                    <h2 class="wc-word-text">${escapeHtml(isSingleWord ? (normalizedWord || text) : '句子翻译 / Sentence')}</h2>
                     ${isSingleWord ? `
                     <div class="wc-phonetic-row">
-                        <span class="wc-phonetic-text">${phonetic}</span>
+                        <span class="wc-phonetic-text">${escapeHtml(phonetic)}</span>
                         <button class="wc-audio-btn" id="wc-play-audio" title="播放发音">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
                         </button>
@@ -212,7 +221,7 @@ async function showPopup(x, y, text, context = '') {
                 ${(isSingleWord && chineseTranslation) ? `
                     <div class="wc-meaning-block" style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed rgba(0,0,0,0.1);">
                         <div class="wc-pos" style="background:#dbeafe; color:#1e40af;">中文</div>
-                        <div class="wc-definition" style="font-weight: 600; color:#1e3a8a;">${chineseTranslation}</div>
+                        <div class="wc-definition" style="font-weight: 600; color:#1e3a8a;">${escapeHtml(chineseTranslation)}</div>
                     </div>` : ''}
             </div>
             <div id="wc-status-container">
@@ -229,11 +238,13 @@ async function showPopup(x, y, text, context = '') {
             playBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="wc-spin"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"></path></svg>`;
             
             const restoreIcon = () => { playBtn.innerHTML = originalIcon; };
+            stopCurrentAudio();
 
             const playWithFallback = () => {
                 // Tier 1: Real Audio (Preloaded)
                 if (audioObj) {
                     audioObj.currentTime = 0;
+                    currentAudio = audioObj;
                     audioObj.play()
                         .then(() => restoreIcon())
                         .catch(err => {
@@ -250,6 +261,7 @@ async function showPopup(x, y, text, context = '') {
                 // Note: Youdao works best for words and short phrases.
                 const youdaoUrl = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&type=2`;
                 const ydAudio = new Audio(youdaoUrl);
+                currentAudio = ydAudio;
                 
                 // Timeout fallback
                 const timeoutId = setTimeout(() => {
@@ -292,7 +304,7 @@ async function showPopup(x, y, text, context = '') {
             svg.setAttribute('fill', 'currentColor');
 
             const def = isSingleWord ? (engData?.meanings[0].definitions[0].definition || '') : text;
-            await saveWord(text, def, engData || {}, chineseTranslation, isSingleWord, context);
+            await saveWord(isSingleWord ? (normalizedWord || text) : text, def, engData || {}, chineseTranslation, isSingleWord, context);
 
             // Update status text
             const statusContainer = document.getElementById('wc-status-container');
@@ -327,12 +339,14 @@ function removePopup() {
 }
 
 async function saveWord(text, definition, fullData, chineseTranslation, isSingleWord, context) {
+    const originalText = String(text ?? '');
     const key = text.toLowerCase();
     const result = await chrome.storage.local.get(['collectedWords']);
     const words = result.collectedWords || {};
 
     if (!words[key]) {
         words[key] = {
+            originalText,
             definition,
             chinese: chineseTranslation || '',
             phonetic: isSingleWord ? ((fullData && fullData.phonetic) || (fullData && fullData.phonetics && fullData.phonetics.find(p => p.text)?.text) || '') : '',
@@ -368,7 +382,7 @@ function highlightWordsOnPage(wordsMap) {
     const wordsToHighlight = Object.keys(wordsMap).filter(k => !wordsMap[k].isSentence && !k.includes(' '));
     if (wordsToHighlight.length === 0) return;
 
-    const sortedWords = wordsToHighlight.sort((a, b) => b.length - a.length);
+    const sortedWords = wordsToHighlight.sort((a, b) => b.length - a.length).map(escapeRegExp);
     const regex = new RegExp(`\\b(${sortedWords.join('|')})\\b`, 'gi');
 
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
@@ -378,6 +392,7 @@ function highlightWordsOnPage(wordsMap) {
         const parent = node.parentElement;
         if (!parent) continue;
         if (['script', 'style', 'textarea', 'input', 'code', 'noscript'].includes(parent.tagName.toLowerCase())) continue;
+        if (parent.isContentEditable) continue;
         if (parent.closest('.wc-popup-container') || parent.classList.contains('wc-highlighted-word')) continue;
         textNodes.push(node);
     }
@@ -448,6 +463,79 @@ function formatChineseDefinition(text) {
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === 'local' && changes.collectedWords) {
         const newWords = changes.collectedWords.newValue || {};
-        highlightWordsOnPage(newWords);
+        const newState = buildHighlightState(newWords);
+
+        const removed = [];
+        const changed = [];
+        const added = [];
+
+        for (const [key, fp] of lastHighlightState.entries()) {
+            const nextFp = newState.get(key);
+            if (!nextFp) {
+                removed.push(key);
+            } else if (nextFp !== fp) {
+                changed.push(key);
+            }
+        }
+
+        for (const key of newState.keys()) {
+            if (!lastHighlightState.has(key)) added.push(key);
+        }
+
+        if (removed.length > 0 || changed.length > 0) {
+            cleanupHighlights();
+            highlightWordsOnPage(newWords);
+        } else if (added.length > 0) {
+            const subset = {};
+            added.forEach(k => {
+                subset[k] = newWords[k];
+            });
+            highlightWordsOnPage(subset);
+        }
+
+        lastHighlightState = newState;
     }
 });
+
+function escapeHtml(value) {
+    const str = String(value ?? '');
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function escapeRegExp(value) {
+    return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function cleanupHighlights() {
+    const nodes = document.querySelectorAll('span.wc-highlighted-word');
+    nodes.forEach(span => {
+        const text = document.createTextNode(span.textContent || '');
+        span.replaceWith(text);
+    });
+}
+
+function stopCurrentAudio() {
+    if (!currentAudio) return;
+    try {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+    } catch {
+    } finally {
+        currentAudio = null;
+    }
+}
+
+function buildHighlightState(wordsMap) {
+    const map = new Map();
+    Object.entries(wordsMap || {}).forEach(([key, value]) => {
+        if (!value || value.isSentence || key.includes(' ')) return;
+        const fp = `${value.mastered ? '1' : '0'}\u0000${value.chinese || ''}\u0000${value.definition || ''}`;
+        map.set(key, fp);
+    });
+    return map;
+}

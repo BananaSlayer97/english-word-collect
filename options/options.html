@@ -227,7 +227,7 @@
             <div class="view-section" id="view-settings" style="display: none;">
                 <div class="section-header">
                     <h1>翻译服务配置 / Translation APIs</h1>
-                    <p style="color: var(--text-dim); font-size: 12px; margin-top: 2px;">仅使用你自己的 Key/AppID；不内置公共接口。</p>
+                    <p style="color: var(--text-dim); font-size: 12px; margin-top: 2px;">默认模式使用公开接口；专业模式仅使用你自己的 Key/AppID。</p>
                 </div>
 
                 <div class="settings-container">
@@ -248,6 +248,7 @@
                                 <label>翻译服务商</label>
                                 <div class="select-wrapper">
                                     <select id="provider-select" class="input-field">
+                                        <option value="default">默认（免费）</option>
                                         <option value="openai">OpenAI</option>
                                         <option value="deepl">DeepL</option>
                                         <option value="youdao">有道智云</option>
@@ -256,12 +257,29 @@
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                                     </div>
                                 </div>
-                                <div class="form-hint">仅使用你自己的 Key/AppID；未配置不会调用任何公共接口。</div>
+                                <div class="form-hint">默认模式会调用公开接口；选择 OpenAI / DeepL / 有道智云时仅使用你自己的 Key/AppID。</div>
                             </div>
                         </div>
                     </div>
 
                     <!-- Config Forms -->
+                    <div class="setting-card config-section" id="config-default" style="display: none;">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"></path><path d="M2 12h20"></path><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                            </div>
+                            <div>
+                                <h3>默认模式（免费）</h3>
+                                <p>不需要 Key；使用公开词典与网页翻译接口</p>
+                            </div>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <div class="form-hint">适合日常查词/简单翻译；更专业的翻译建议使用 OpenAI / DeepL / 有道智云。</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="setting-card config-section" id="config-openai">
                         <div class="card-header">
                             <div class="card-icon">

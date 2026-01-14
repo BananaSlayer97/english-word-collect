@@ -1,7 +1,6 @@
 // background.js
 
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('Word Collector Extension installed.');
     chrome.storage.local.get(['collectedWords'], (result) => {
         if (!result.collectedWords) {
             chrome.storage.local.set({ collectedWords: {} });
@@ -9,9 +8,46 @@ chrome.runtime.onInstalled.addListener(() => {
     });
 });
 
+const responseCache = new Map();
+const inFlightRequests = new Map();
+const CACHE_MAX_ENTRIES = 200;
+
+function cacheGet(key) {
+    const item = responseCache.get(key);
+    if (!item) return null;
+    if (item.expiresAt <= Date.now()) {
+        responseCache.delete(key);
+        return null;
+    }
+    responseCache.delete(key);
+    responseCache.set(key, item);
+    return item.value;
+}
+
+function cacheSet(key, value, ttlMs) {
+    responseCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+    while (responseCache.size > CACHE_MAX_ENTRIES) {
+        const oldestKey = responseCache.keys().next().value;
+        responseCache.delete(oldestKey);
+    }
+}
+
+function withInFlight(key, fn) {
+    const existing = inFlightRequests.get(key);
+    if (existing) return existing;
+    const p = Promise.resolve()
+        .then(fn)
+        .finally(() => {
+            inFlightRequests.delete(key);
+        });
+    inFlightRequests.set(key, p);
+    return p;
+}
+
 // Listen for messages from content scripts or options page
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'speak') {
+        chrome.tts.stop();
         chrome.tts.speak(request.word, {
             lang: 'en-US',
             rate: 0.9,
@@ -43,34 +79,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             // Parallel fetch: English Data (Free) + Chinese Data (Provider)
             
             try {
-                // Task 1: English Data (Always use Free DictionaryAPI as it provides audio/phonetics well)
-                const engPromise = fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`)
-                    .then(r => r.ok ? r.json() : null)
-                    .then(data => (Array.isArray(data) ? data[0] : data));
-
-                // Task 2: Chinese Data
-                let cnPromise;
-
-                if (provider === 'openai' && settings.openai && settings.openai.key) {
-                    cnPromise = translateWithOpenAI(word, settings.openai);
-                } else if (provider === 'youdao' && settings.youdao && settings.youdao.appId) {
-                    cnPromise = translateWithYoudaoOfficial(word, settings.youdao);
-                } else if (provider === 'deepl' && settings.deepl && settings.deepl.key) {
-                    cnPromise = translateWithDeepL(word, settings.deepl);
-                } else {
-                    // Default Fallback: Youdao Suggest (Web)
-                    cnPromise = fetch(`https://dict.youdao.com/suggest?q=${word}&num=1&doctype=json`)
-                        .then(r => r.ok ? r.json() : null)
-                        .then(data => {
-                            if (data && data.data && data.data.entries && data.data.entries[0]) {
-                                return data.data.entries[0].explain;
-                            }
-                            return '';
-                        });
+                const providerKey = buildProviderKey(provider, settings);
+                const cacheKey = `lookupWord:${providerKey}:${word}`;
+                const cached = cacheGet(cacheKey);
+                if (cached) {
+                    sendResponse(cached);
+                    return;
                 }
 
-                const [engData, chinese] = await Promise.all([engPromise, cnPromise]);
-                sendResponse({ engData, chinese });
+                const value = await withInFlight(cacheKey, async () => {
+                    const engPromise = fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${word}`)
+                        .then(r => r.ok ? r.json() : null)
+                        .then(data => (Array.isArray(data) ? data[0] : data));
+
+                    let cnPromise;
+
+                    if (provider === 'openai' && settings.openai && settings.openai.key) {
+                        cnPromise = translateWithOpenAI(word, settings.openai);
+                    } else if (provider === 'youdao' && settings.youdao && settings.youdao.appId) {
+                        cnPromise = translateWithYoudaoOfficial(word, settings.youdao);
+                    } else if (provider === 'deepl' && settings.deepl && settings.deepl.key) {
+                        cnPromise = translateWithDeepL(word, settings.deepl);
+                    } else {
+                        cnPromise = fetch(`https://dict.youdao.com/suggest?q=${word}&num=1&doctype=json`)
+                            .then(r => r.ok ? r.json() : null)
+                            .then(data => {
+                                if (data && data.data && data.data.entries && data.data.entries[0]) {
+                                    return data.data.entries[0].explain;
+                                }
+                                return '';
+                            });
+                    }
+
+                    const [engData, chinese] = await Promise.all([engPromise, cnPromise]);
+                    return { engData, chinese };
+                });
+
+                cacheSet(cacheKey, value, 60 * 60 * 1000);
+                sendResponse(value);
 
             } catch (err) {
                 console.error('Lookup failed', err);
@@ -88,20 +134,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             const provider = settings.provider || 'default';
 
             try {
-                let translation = '';
-
-                if (provider === 'openai' && settings.openai && settings.openai.key) {
-                    translation = await translateWithOpenAI(text, settings.openai);
-                } else if (provider === 'youdao' && settings.youdao && settings.youdao.appId) {
-                    translation = await translateWithYoudaoOfficial(text, settings.youdao);
-                } else if (provider === 'deepl' && settings.deepl && settings.deepl.key) {
-                    translation = await translateWithDeepL(text, settings.deepl);
-                } else {
-                    // Default Web Scraping (Legacy/Leech mode)
-                    translation = await translateWithWeb(text);
+                const providerKey = buildProviderKey(provider, settings);
+                const cacheKey = `translateText:${providerKey}:${truncateCacheText(text)}`;
+                const cached = cacheGet(cacheKey);
+                if (cached) {
+                    sendResponse(cached);
+                    return;
                 }
 
-                sendResponse({ translation });
+                const value = await withInFlight(cacheKey, async () => {
+                    let translation = '';
+
+                    if (provider === 'openai' && settings.openai && settings.openai.key) {
+                        translation = await translateWithOpenAI(text, settings.openai);
+                    } else if (provider === 'youdao' && settings.youdao && settings.youdao.appId) {
+                        translation = await translateWithYoudaoOfficial(text, settings.youdao);
+                    } else if (provider === 'deepl' && settings.deepl && settings.deepl.key) {
+                        translation = await translateWithDeepL(text, settings.deepl);
+                    } else {
+                        translation = await translateWithWeb(text);
+                    }
+
+                    return { translation };
+                });
+                cacheSet(cacheKey, value, 15 * 60 * 1000);
+                sendResponse(value);
             } catch (err) {
                 console.error("Translation failed:", err);
                 // Fallback to Web if Professional fails? 
@@ -156,7 +213,7 @@ async function translateWithWeb(text) {
 async function translateWithOpenAI(text, config) {
     const apiKey = config.key;
     const model = config.model || 'gpt-3.5-turbo';
-    const apiHost = config.host || 'https://api.openai.com';
+    const apiHost = normalizeHttpsHost(config.host) || 'https://api.openai.com';
 
     // Simple Prompt
     const messages = [
@@ -186,16 +243,42 @@ async function translateWithOpenAI(text, config) {
     return data.choices[0].message.content.trim();
 }
 
-// TODO: Implement Youdao Official signing logic if needed. 
-// It requires MD5(appId + q + salt + curtime + appSecret).
-// We need a crypto library or simple implementation. 
-// For now, we stub it or implement a simple MD5 helper if we want to be thorough.
-// Since User emphasized "Professional Mode", let's leave a placeholder or implement it if requested.
-// OpenAI is usually enough for "Professional". 
-
 async function translateWithYoudaoOfficial(text, config) {
-   // Placeholder for Youdao Official
-   throw new Error("Youdao Official API not yet implemented. Please use OpenAI.");
+    const appKey = config.appId;
+    const appSecret = config.appSecret;
+    if (!appKey || !appSecret) throw new Error('Youdao AppID/AppSecret missing');
+
+    const salt = crypto.randomUUID();
+    const curtime = Math.floor(Date.now() / 1000).toString();
+    const signStr = `${appKey}${truncateYoudaoInput(text)}${salt}${curtime}${appSecret}`;
+    const sign = await sha256Hex(signStr);
+
+    const body = new URLSearchParams({
+        q: text,
+        from: 'auto',
+        to: 'zh-CHS',
+        appKey,
+        salt,
+        sign,
+        signType: 'v3',
+        curtime
+    });
+
+    const res = await fetch('https://openapi.youdao.com/api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+    });
+
+    if (!res.ok) throw new Error(`Youdao HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.errorCode && data.errorCode !== '0') {
+        throw new Error(`Youdao Error ${data.errorCode}${data.errorMessage ? `: ${data.errorMessage}` : ''}`);
+    }
+    if (Array.isArray(data.translation) && data.translation.length > 0) {
+        return data.translation.join('\n').trim();
+    }
+    throw new Error('No translation returned from Youdao');
 }
 
 async function translateWithDeepL(text, config) {
@@ -227,4 +310,53 @@ async function translateWithDeepL(text, config) {
         return data.translations[0].text;
     }
     throw new Error('No translation returned from DeepL');
+}
+
+function normalizeHttpsHost(input) {
+    if (!input) return '';
+    const raw = String(input).trim().replace(/\/+$/, '');
+    if (!raw) return '';
+    try {
+        const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+        if (url.protocol !== 'https:') return '';
+        return `${url.protocol}//${url.host}`;
+    } catch {
+        return '';
+    }
+}
+
+function truncateYoudaoInput(q) {
+    const str = String(q ?? '');
+    const len = str.length;
+    if (len <= 20) return str;
+    return `${str.slice(0, 10)}${len}${str.slice(len - 10)}`;
+}
+
+async function sha256Hex(input) {
+    const data = new TextEncoder().encode(String(input));
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function buildProviderKey(provider, settings) {
+    if (provider === 'openai') {
+        const host = normalizeHttpsHost(settings.openai?.host) || 'https://api.openai.com';
+        const model = settings.openai?.model || 'gpt-3.5-turbo';
+        return `openai:${host}:${model}`;
+    }
+    if (provider === 'deepl') {
+        const type = settings.deepl?.type || 'free';
+        return `deepl:${type}`;
+    }
+    if (provider === 'youdao') {
+        const appId = settings.youdao?.appId || '';
+        return `youdao:${appId}`;
+    }
+    return 'default';
+}
+
+function truncateCacheText(text) {
+    const str = String(text ?? '').trim();
+    if (str.length <= 220) return str;
+    return `${str.slice(0, 120)}\u0000${str.length}\u0000${str.slice(-80)}`;
 }

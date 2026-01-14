@@ -336,12 +336,12 @@ body {
 /* Flashcards */
 .flashcard-wrap {
     max-width: 500px;
-    margin: 40px auto;
+    margin: 22px auto;
 }
 
 .card-container {
     perspective: 1000px;
-    height: 320px;
+    height: 260px;
     cursor: pointer;
 }
 
@@ -366,14 +366,14 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-radius: 30px;
-    padding: 30px;
+    border-radius: 22px;
+    padding: 18px;
     border: 1px solid var(--border);
     background: var(--bg-card);
 }
 
 .face-front h2 {
-    font-size: 40px;
+    font-size: 34px;
     font-weight: 800;
 }
 
@@ -538,8 +538,8 @@ body {
 .study-mode-switch {
     display: flex;
     background: rgba(255, 255, 255, 0.05);
-    padding: 4px;
-    border-radius: 12px;
+    padding: 3px;
+    border-radius: 10px;
     margin-left: auto;
     /* Push to right */
 }
@@ -548,9 +548,9 @@ body {
     background: transparent;
     border: none;
     color: var(--text-dim);
-    padding: 8px 16px;
+    padding: 6px 12px;
     border-radius: 8px;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
     cursor: pointer;
     transition: var(--transition);
@@ -563,11 +563,11 @@ body {
 }
 
 .quiz-wrap {
-    max-width: 500px;
-    margin: 30px auto;
+    max-width: 520px;
+    margin: 20px auto;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 12px;
 }
 
 .quiz-progress {
@@ -582,8 +582,8 @@ body {
 .quiz-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 40px 20px;
+    border-radius: 16px;
+    padding: 28px 16px;
     text-align: center;
     position: relative;
     overflow: hidden;
@@ -596,8 +596,8 @@ body {
 }
 
 .btn-audio-large {
-    width: 60px;
-    height: 60px;
+    width: 48px;
+    height: 48px;
     border-radius: 50%;
     background: rgba(129, 140, 248, 0.1);
     border: 2px solid rgba(129, 140, 248, 0.3);
@@ -616,7 +616,7 @@ body {
 }
 
 #quiz-question-word {
-    font-size: 32px;
+    font-size: 26px;
     font-weight: 800;
     margin-bottom: 10px;
 }
@@ -624,20 +624,20 @@ body {
 .quiz-options-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 10px;
 }
 
 .quiz-option-btn {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--border);
-    padding: 20px;
-    border-radius: 16px;
+    padding: 14px;
+    border-radius: 12px;
     color: var(--text-main);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
-    min-height: 80px;
+    min-height: 64px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -688,36 +688,36 @@ body {
 .sentences-grid {
     display: flex;
     flex-direction: column;
-    gap: 30px;
-    margin: 30px auto;
-    max-width: 800px;
+    gap: 14px;
+    margin: 18px auto;
+    max-width: 760px;
     /* Center and restrict width for readability */
 }
 
 /* Spelling Mode Styles */
 .spelling-wrap {
     max-width: 600px;
-    margin: 40px auto;
+    margin: 22px auto;
 }
 
 .spelling-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 24px;
-    padding: 50px 30px;
+    border-radius: 18px;
+    padding: 28px 18px;
     text-align: center;
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
 }
 
 .spelling-hint-cn {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: 700;
     color: var(--text-main);
-    margin-bottom: 30px;
+    margin-bottom: 18px;
 }
 
 .spelling-audio-hint {
-    margin-bottom: 40px;
+    margin-bottom: 18px;
     display: flex;
     justify-content: center;
 }
@@ -733,9 +733,9 @@ body {
     background: rgba(255, 255, 255, 0.05);
     border: 2px solid var(--border);
     border-radius: 12px;
-    padding: 16px 20px;
+    padding: 12px 16px;
     color: white;
-    font-size: 24px;
+    font-size: 20px;
     font-weight: 700;
     text-align: center;
     transition: var(--transition);
@@ -784,35 +784,35 @@ body {
 .sentence-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 20px;
-    padding: 32px;
+    border-radius: 16px;
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 12px;
     transition: var(--transition);
     position: relative;
     overflow: hidden;
 }
 
 .sentence-card:hover {
-    transform: translateY(-4px);
+    transform: translateY(-2px);
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
     border-color: rgba(255, 255, 255, 0.15);
 }
 
 .sentence-card .en {
-    font-size: 19px;
+    font-size: 16px;
     font-weight: 600;
-    line-height: 1.6;
+    line-height: 1.55;
     color: var(--text-main);
 }
 
 .sentence-card .cn {
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 13.5px;
+    line-height: 1.55;
     color: var(--primary);
     background: rgba(129, 140, 248, 0.05);
-    padding: 12px;
+    padding: 10px;
     border-radius: 10px;
     border-left: 3px solid var(--primary);
 }
@@ -822,23 +822,23 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-top: 12px;
+    padding-top: 10px;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .sentence-card .date {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-dim);
 }
 
 .sentence-card-actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
 }
 
 .btn-icon-sm {
-    width: 32px;
-    height: 32px;
+    width: 28px;
+    height: 28px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.05);
     background: rgba(255, 255, 255, 0.02);

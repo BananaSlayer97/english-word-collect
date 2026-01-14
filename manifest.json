@@ -5,8 +5,6 @@
   "description": "Collect and learn English words while browsing.",
   "permissions": [
     "storage",
-    "activeTab",
-    "scripting",
     "tts"
   ],
   "action": {
@@ -18,9 +16,17 @@
     }
   },
   "host_permissions": [
-    "*://*.dictionaryapi.dev/*",
-    "*://*.youdao.com/*",
-    "*://translate.googleapis.com/*"
+    "https://api.dictionaryapi.dev/*",
+    "https://dict.youdao.com/*",
+    "https://fanyi.youdao.com/*",
+    "https://openapi.youdao.com/*",
+    "https://api.openai.com/*",
+    "https://api-free.deepl.com/*",
+    "https://api.deepl.com/*",
+    "https://translate.googleapis.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background/background.js"
