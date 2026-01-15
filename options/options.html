@@ -262,6 +262,46 @@
                         </div>
                     </div>
 
+                    <div class="setting-card">
+                        <div class="card-header">
+                            <div class="card-icon">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"></path><path d="M4 12h16"></path><path d="M12 6v12"></path></svg>
+                            </div>
+                            <div>
+                                <h3>弹窗显示</h3>
+                                <p>控制划词弹窗展示的信息密度</p>
+                            </div>
+                        </div>
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <label style="display:flex; align-items:center; gap:10px;">
+                                    <input type="checkbox" id="ui-show-context">
+                                    <span>显示上下文（Context）</span>
+                                </label>
+                                <div class="form-hint">在弹窗底部展示包含选中内容的句子（或周边文本）。</div>
+                            </div>
+                            <div class="form-group full-width">
+                                <label style="display:flex; align-items:center; gap:10px;">
+                                    <input type="checkbox" id="ui-show-examples">
+                                    <span>显示例句（若词典提供）</span>
+                                </label>
+                            </div>
+                            <div class="form-group full-width">
+                                <label style="display:flex; align-items:center; gap:10px;">
+                                    <input type="checkbox" id="ui-default-expanded">
+                                    <span>默认展开“更多”</span>
+                                </label>
+                            </div>
+                            <div class="form-group full-width">
+                                <label style="display:flex; align-items:center; gap:10px;">
+                                    <input type="checkbox" id="ui-enable-enhance">
+                                    <span>启用 OpenAI 增强信息（同义替换/搭配/多版本译文）</span>
+                                </label>
+                                <div class="form-hint">仅在服务商选择 OpenAI 且已配置 Key 时生效。</div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Config Forms -->
                     <div class="setting-card config-section" id="config-default" style="display: none;">
                         <div class="card-header">

@@ -782,8 +782,9 @@ function setupSettings() {
 }
 
 function loadSettingsUI() {
-    chrome.storage.local.get(['apiSettings'], (result) => {
+    chrome.storage.local.get(['apiSettings', 'uiSettings'], (result) => {
         const settings = result.apiSettings || { provider: 'default', openai: {}, youdao: {}, deepl: {} };
+        const uiSettings = result.uiSettings || {};
         
         const providerSelect = document.getElementById('provider-select');
         if (providerSelect) {
@@ -809,6 +810,16 @@ function loadSettingsUI() {
             document.getElementById('deepl-key').value = settings.deepl.key || '';
             document.getElementById('deepl-type').value = settings.deepl.type || 'free';
         }
+
+        const showContext = document.getElementById('ui-show-context');
+        const showExamples = document.getElementById('ui-show-examples');
+        const enableEnhance = document.getElementById('ui-enable-enhance');
+        const defaultExpanded = document.getElementById('ui-default-expanded');
+
+        if (showContext) showContext.checked = uiSettings.showContext !== false;
+        if (showExamples) showExamples.checked = uiSettings.showExamples !== false;
+        if (enableEnhance) enableEnhance.checked = !!uiSettings.enableEnhance;
+        if (defaultExpanded) defaultExpanded.checked = !!uiSettings.defaultExpanded;
     });
 }
 
@@ -844,7 +855,14 @@ async function saveSettings() {
         return;
     }
 
-    chrome.storage.local.set({ apiSettings: settings }, () => {
+    const uiSettings = {
+        showContext: document.getElementById('ui-show-context')?.checked !== false,
+        showExamples: document.getElementById('ui-show-examples')?.checked !== false,
+        enableEnhance: !!document.getElementById('ui-enable-enhance')?.checked,
+        defaultExpanded: !!document.getElementById('ui-default-expanded')?.checked
+    };
+
+    chrome.storage.local.set({ apiSettings: settings, uiSettings }, () => {
         showToast('已保存，立即生效', 'success');
     });
 }

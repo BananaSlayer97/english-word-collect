@@ -112,7 +112,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
 
                     const [engData, chinese] = await Promise.all([engPromise, cnPromise]);
-                    return { engData, chinese };
+                    return { provider, engData, chinese };
                 });
 
                 cacheSet(cacheKey, value, 60 * 60 * 1000);
@@ -155,7 +155,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         translation = await translateWithWeb(text);
                     }
 
-                    return { translation };
+                    return { provider, translation };
                 });
                 cacheSet(cacheKey, value, 15 * 60 * 1000);
                 sendResponse(value);
@@ -174,6 +174,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         });
 
         return true; // Keep channel open
+    }
+
+    if (request.action === 'enhancePopup') {
+        const kind = request.kind;
+        const text = request.text;
+        const context = request.context || '';
+
+        chrome.storage.local.get(['apiSettings', 'uiSettings'], async (result) => {
+            const settings = result.apiSettings || {};
+            const uiSettings = result.uiSettings || {};
+            const provider = settings.provider || 'default';
+
+            if (provider !== 'openai') {
+                sendResponse({ provider, error: 'Enhance requires OpenAI provider' });
+                return;
+            }
+            if (!uiSettings.enableEnhance) {
+                sendResponse({ provider, error: 'Enhance disabled' });
+                return;
+            }
+            if (kind !== 'word' && kind !== 'sentence') {
+                sendResponse({ provider, error: 'Invalid kind' });
+                return;
+            }
+
+            try {
+                const providerKey = buildProviderKey(provider, settings);
+                const cacheKey = `enhance:${kind}:${providerKey}:${truncateCacheText(`${text}\n${context}`)}`;
+                const cached = cacheGet(cacheKey);
+                if (cached) {
+                    sendResponse(cached);
+                    return;
+                }
+
+                const value = await withInFlight(cacheKey, async () => {
+                    const enhanced = await enhanceWithOpenAI(kind, text, context, settings.openai || {});
+                    return { provider, enhanced };
+                });
+
+                cacheSet(cacheKey, value, 30 * 60 * 1000);
+                sendResponse(value);
+            } catch (err) {
+                sendResponse({ provider, error: err?.message || String(err) });
+            }
+        });
+
+        return true;
     }
 
     // Maintain connection
@@ -312,6 +359,60 @@ async function translateWithDeepL(text, config) {
     throw new Error('No translation returned from DeepL');
 }
 
+async function enhanceWithOpenAI(kind, text, context, config) {
+    const apiKey = config.key;
+    if (!apiKey) throw new Error('OpenAI API Key missing');
+    const model = config.model || 'gpt-3.5-turbo';
+    const apiHost = normalizeHttpsHost(config.host) || 'https://api.openai.com';
+
+    const payload = kind === 'word'
+        ? {
+            schema: 'wc.v1.word',
+            word: text,
+            context
+        }
+        : {
+            schema: 'wc.v1.sentence',
+            text,
+            context
+        };
+
+    const messages = [
+        {
+            role: 'system',
+            content: 'Return JSON only. No markdown, no extra text. Keep arrays short. Use Simplified Chinese for explanations.'
+        },
+        {
+            role: 'user',
+            content: `Generate professional translation helper info as JSON for this input:\n${JSON.stringify(payload)}\n\nIf schema is wc.v1.word, include: synonyms_en[], collocations_en[], forms_en[], notes_zh.\nIf schema is wc.v1.sentence, include: alternatives_zh[{style, text}], grammar_zh[], keywords_en[].`
+        }
+    ];
+
+    const res = await fetch(`${apiHost}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model,
+            messages,
+            temperature: 0.2
+        })
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error?.message || 'OpenAI API Error');
+    }
+
+    const data = await res.json();
+    const content = data?.choices?.[0]?.message?.content || '';
+    const parsed = safeJsonParse(content);
+    if (!parsed) throw new Error('Failed to parse enhance JSON');
+    return sanitizeEnhanceResult(kind, parsed);
+}
+
 function normalizeHttpsHost(input) {
     if (!input) return '';
     const raw = String(input).trim().replace(/\/+$/, '');
@@ -359,4 +460,50 @@ function truncateCacheText(text) {
     const str = String(text ?? '').trim();
     if (str.length <= 220) return str;
     return `${str.slice(0, 120)}\u0000${str.length}\u0000${str.slice(-80)}`;
+}
+
+function safeJsonParse(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    try {
+        return JSON.parse(raw);
+    } catch {
+        const start = raw.indexOf('{');
+        const end = raw.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            try {
+                return JSON.parse(raw.slice(start, end + 1));
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    }
+}
+
+function sanitizeEnhanceResult(kind, obj) {
+    const safe = (v) => String(v ?? '').trim();
+    const safeArr = (arr, maxLen) => Array.isArray(arr) ? arr.map(safe).filter(Boolean).slice(0, maxLen) : [];
+
+    if (kind === 'word') {
+        return {
+            synonyms_en: safeArr(obj.synonyms_en, 10),
+            collocations_en: safeArr(obj.collocations_en, 10),
+            forms_en: safeArr(obj.forms_en, 10),
+            notes_zh: safe(obj.notes_zh).slice(0, 220)
+        };
+    }
+
+    const alternatives = Array.isArray(obj.alternatives_zh)
+        ? obj.alternatives_zh.slice(0, 4).map((x) => ({
+            style: safe(x?.style).slice(0, 16),
+            text: safe(x?.text).slice(0, 220)
+        })).filter(x => x.text)
+        : [];
+
+    return {
+        alternatives_zh: alternatives,
+        grammar_zh: safeArr(obj.grammar_zh, 6).map(s => s.slice(0, 120)),
+        keywords_en: safeArr(obj.keywords_en, 10)
+    };
 }

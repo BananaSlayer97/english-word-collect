@@ -5,6 +5,7 @@ let popup = null;
 let currentAudio = null;
 let highlightTimeoutId = null;
 let lastHighlightState = new Map();
+let popupPinned = false;
 
 // Initialize: highlight existing words on load
 function initHighlighting() {
@@ -78,13 +79,14 @@ function handleMouseUp(event) {
 
         showPopup(event.pageX, event.pageY, selectedText, contextSentence);
     } else {
-        removePopup();
+        if (!popupPinned) removePopup();
     }
 }
 
 async function showPopup(x, y, text, context = '') {
     if (popup && popup.getAttribute('data-text') === text) return;
     removePopup();
+    popupPinned = false;
 
     const isSingleWord = !text.includes(' ') && text.length < 30;
     const normalizedWord = isSingleWord ? text.toLowerCase().replace(/[^a-z-]/g, '') : '';
@@ -112,12 +114,15 @@ async function showPopup(x, y, text, context = '') {
     document.body.appendChild(popup);
 
     try {
+        const ui = await getUiSettings();
         let engData = null;
         let chineseTranslation = '';
         let phonetic = '';
         let meaningsHtml = '';
         let audioUrl = null;
         let audioObj = null;
+        let provider = 'default';
+        let enhanced = null;
 
         if (isSingleWord) {
             const word = normalizedWord;
@@ -133,6 +138,7 @@ async function showPopup(x, y, text, context = '') {
 
             engData = result.engData;
             chineseTranslation = result.chinese;
+            provider = result.provider || provider;
 
             if (engData) {
                 phonetic = engData.phonetic || (engData.phonetics && engData.phonetics.find(p => p.text)?.text) || '';
@@ -149,17 +155,7 @@ async function showPopup(x, y, text, context = '') {
                     }
                 }
 
-                if (engData.meanings) {
-                    engData.meanings.slice(0, 2).forEach(m => {
-                        const def = m.definitions[0] || { definition: 'No definition' };
-                        meaningsHtml += `
-                            <div class="wc-meaning-block">
-                                <span class="wc-pos">${escapeHtml(m.partOfSpeech)}</span>
-                                <div class="wc-definition">${escapeHtml(def.definition)}</div>
-                            </div>
-                        `;
-                    });
-                }
+                meaningsHtml = renderWordMeanings(engData, ui);
             }
         } else {
             // Delegate sentence translation
@@ -173,6 +169,7 @@ async function showPopup(x, y, text, context = '') {
             if (result.error) throw new Error(result.error);
 
             chineseTranslation = result.translation;
+            provider = result.provider || provider;
             if (chineseTranslation) {
                 meaningsHtml = `
                     <div class="wc-sentence-translation">${escapeHtml(chineseTranslation)}</div>
@@ -194,6 +191,8 @@ async function showPopup(x, y, text, context = '') {
         const isCollected = !!storedItem;
         const isMastered = storedItem && storedItem.mastered;
 
+        const providerLabel = formatProviderLabel(provider);
+
         popup.innerHTML = `
             <div class="wc-header">
                 <div class="wc-word-info">
@@ -210,11 +209,20 @@ async function showPopup(x, y, text, context = '') {
                     </button>
                     `}
                 </div>
-                <button id="wc-heart-btn" class="wc-heart-btn ${isCollected ? 'active' : ''}" title="${isCollected ? '已收藏' : '加入词库'}">
-                    <svg class="heart-icon" viewBox="0 0 24 24" fill="${isCollected ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
-                        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-                    </svg>
-                </button>
+                <div class="wc-header-actions">
+                    <span class="wc-provider-badge" title="当前翻译服务商">${escapeHtml(providerLabel)}</span>
+                    <button class="wc-icon-btn" id="wc-pin-btn" title="固定弹窗">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M14 9l7-7"></path><path d="M14 9l-4 4"></path><path d="M3 21l9-9"></path><path d="M15 3l6 6"></path></svg>
+                    </button>
+                    <button class="wc-icon-btn" id="wc-copy-btn" title="复制译文/释义">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </button>
+                    <button id="wc-heart-btn" class="wc-heart-btn ${isCollected ? 'active' : ''}" title="${isCollected ? '已收藏' : '加入词库'}">
+                        <svg class="heart-icon" viewBox="0 0 24 24" fill="${isCollected ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2">
+                            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div class="wc-content-scroll">
                 ${meaningsHtml}
@@ -223,6 +231,20 @@ async function showPopup(x, y, text, context = '') {
                         <div class="wc-pos" style="background:#dbeafe; color:#1e40af;">中文</div>
                         <div class="wc-definition" style="font-weight: 600; color:#1e3a8a;">${escapeHtml(chineseTranslation)}</div>
                     </div>` : ''}
+                ${ui.showContext && context ? `
+                    <div class="wc-context">
+                        <span class="wc-context-label">Context</span>
+                        <div class="wc-context-text">${escapeHtml(context)}</div>
+                    </div>` : ''}
+                <div class="wc-expand">
+                    <button class="wc-expand-btn" id="wc-expand-btn" aria-expanded="${ui.defaultExpanded ? 'true' : 'false'}">
+                        ${ui.defaultExpanded ? '收起更多' : '更多'}
+                    </button>
+                </div>
+                <div class="wc-more ${ui.defaultExpanded ? 'open' : ''}" id="wc-more">
+                    <div class="wc-more-section" id="wc-more-static"></div>
+                    <div class="wc-more-section" id="wc-more-enhanced"></div>
+                </div>
             </div>
             <div id="wc-status-container">
                 ${isCollected ? `<div class="wc-status"><span class="wc-dot"></span> ${isMastered ? '已归档' : '已收藏'}</div>` : ''}
@@ -312,6 +334,81 @@ async function showPopup(x, y, text, context = '') {
 
             // Optional: Shake effect if already saved? No, just keep as "Saved" state.
         });
+
+        const pinBtn = document.getElementById('wc-pin-btn');
+        pinBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            popupPinned = !popupPinned;
+            pinBtn.classList.toggle('active', popupPinned);
+        });
+
+        const copyBtn = document.getElementById('wc-copy-btn');
+        copyBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const copyText = isSingleWord
+                ? (chineseTranslation || collectPrimaryDefinitions(engData) || '')
+                : (chineseTranslation || '');
+            if (!copyText) return;
+            await copyToClipboard(copyText);
+            flashButton(copyBtn);
+        });
+
+        const expandBtn = document.getElementById('wc-expand-btn');
+        const more = document.getElementById('wc-more');
+        const staticContainer = document.getElementById('wc-more-static');
+        const enhancedContainer = document.getElementById('wc-more-enhanced');
+
+        const renderMoreStatic = () => {
+            if (isSingleWord) {
+                staticContainer.innerHTML = renderWordMoreStatic(engData, ui);
+            } else {
+                staticContainer.innerHTML = '';
+            }
+        };
+
+        const renderMoreEnhanced = async () => {
+            if (!ui.enableEnhance) return;
+            if (provider !== 'openai') return;
+            if (!enhancedContainer) return;
+            enhancedContainer.innerHTML = `<div class="wc-more-loading">正在生成增强信息…</div>`;
+            const response = await new Promise(resolve => {
+                chrome.runtime.sendMessage({ action: 'enhancePopup', kind: isSingleWord ? 'word' : 'sentence', text: isSingleWord ? normalizedWord : text, context }, (resp) => resolve(resp || {}));
+            });
+            if (!popup || popup.getAttribute('data-text') !== text || popup.dataset.requestId !== requestId) return;
+            if (response.error) {
+                enhancedContainer.innerHTML = `<div class="wc-more-error">${escapeHtml(String(response.error))}</div>`;
+                return;
+            }
+            enhanced = response.enhanced || null;
+            enhancedContainer.innerHTML = renderEnhanced(kindForEnhance(isSingleWord), enhanced);
+        };
+
+        const openMore = async () => {
+            more.classList.add('open');
+            expandBtn.setAttribute('aria-expanded', 'true');
+            expandBtn.innerText = '收起更多';
+            renderMoreStatic();
+            await renderMoreEnhanced();
+        };
+
+        const closeMore = () => {
+            more.classList.remove('open');
+            expandBtn.setAttribute('aria-expanded', 'false');
+            expandBtn.innerText = '更多';
+        };
+
+        expandBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (more.classList.contains('open')) {
+                closeMore();
+            } else {
+                await openMore();
+            }
+        });
+
+        if (ui.defaultExpanded) {
+            await openMore();
+        }
 
         // Click outside to close is handled by global listener (if implemented) or we rely on user clicking away.
         // But previously there was a global click listener to close it? 
@@ -538,4 +635,125 @@ function buildHighlightState(wordsMap) {
         map.set(key, fp);
     });
     return map;
+}
+
+async function getUiSettings() {
+    const result = await chrome.storage.local.get(['uiSettings']);
+    const stored = result.uiSettings || {};
+    return {
+        showContext: stored.showContext !== false,
+        showExamples: stored.showExamples !== false,
+        enableEnhance: !!stored.enableEnhance,
+        defaultExpanded: !!stored.defaultExpanded
+    };
+}
+
+function formatProviderLabel(provider) {
+    if (provider === 'openai') return 'OpenAI';
+    if (provider === 'deepl') return 'DeepL';
+    if (provider === 'youdao') return '有道';
+    return '默认';
+}
+
+function collectPrimaryDefinitions(engData) {
+    if (!engData || !Array.isArray(engData.meanings)) return '';
+    const defs = [];
+    engData.meanings.slice(0, 2).forEach(m => {
+        const def = m?.definitions?.[0]?.definition;
+        if (def) defs.push(def);
+    });
+    return defs.join('\n');
+}
+
+function renderWordMeanings(engData, ui) {
+    if (!engData || !Array.isArray(engData.meanings)) return '';
+    let html = '';
+    engData.meanings.slice(0, 3).forEach(m => {
+        const def = m?.definitions?.[0] || null;
+        if (!def) return;
+        const example = ui.showExamples ? (def.example || '') : '';
+        html += `
+            <div class="wc-meaning-block">
+                <span class="wc-pos">${escapeHtml(m.partOfSpeech || '')}</span>
+                <div class="wc-definition">${escapeHtml(def.definition || '')}</div>
+                ${example ? `<div class="wc-example">${escapeHtml(example)}</div>` : ''}
+            </div>
+        `;
+    });
+    return html;
+}
+
+function renderWordMoreStatic(engData, ui) {
+    if (!engData || !Array.isArray(engData.meanings)) return '';
+    const defs = [];
+    engData.meanings.slice(0, 4).forEach(m => {
+        const def = m?.definitions?.[0] || null;
+        if (!def) return;
+        defs.push({
+            pos: m.partOfSpeech || '',
+            definition: def.definition || '',
+            example: ui.showExamples ? (def.example || '') : ''
+        });
+    });
+    if (defs.length === 0) return '';
+    return defs.map(d => `
+        <div class="wc-more-item">
+            <div class="wc-more-title">${escapeHtml(d.pos)}</div>
+            <div class="wc-more-text">${escapeHtml(d.definition)}</div>
+            ${d.example ? `<div class="wc-more-sub">${escapeHtml(d.example)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function renderEnhanced(kind, enhanced) {
+    if (!enhanced) return '';
+    if (kind === 'word') {
+        const chips = (arr) => (arr || []).map(x => `<span class="wc-chip">${escapeHtml(x)}</span>`).join('');
+        const synonyms = chips(enhanced.synonyms_en);
+        const collocations = chips(enhanced.collocations_en);
+        const forms = chips(enhanced.forms_en);
+        const notes = enhanced.notes_zh ? `<div class="wc-more-text">${escapeHtml(enhanced.notes_zh)}</div>` : '';
+        return `
+            ${synonyms ? `<div class="wc-more-item"><div class="wc-more-title">同义替换</div><div class="wc-chip-row">${synonyms}</div></div>` : ''}
+            ${collocations ? `<div class="wc-more-item"><div class="wc-more-title">常见搭配</div><div class="wc-chip-row">${collocations}</div></div>` : ''}
+            ${forms ? `<div class="wc-more-item"><div class="wc-more-title">词形变化</div><div class="wc-chip-row">${forms}</div></div>` : ''}
+            ${notes ? `<div class="wc-more-item"><div class="wc-more-title">提示</div>${notes}</div>` : ''}
+        `;
+    }
+
+    const alt = Array.isArray(enhanced.alternatives_zh) ? enhanced.alternatives_zh : [];
+    const grammar = Array.isArray(enhanced.grammar_zh) ? enhanced.grammar_zh : [];
+    const keywords = Array.isArray(enhanced.keywords_en) ? enhanced.keywords_en : [];
+    const altHtml = alt.map(a => `<div class="wc-more-item"><div class="wc-more-title">${escapeHtml(a.style || '版本')}</div><div class="wc-more-text">${escapeHtml(a.text || '')}</div></div>`).join('');
+    const grammarHtml = grammar.length ? `<div class="wc-more-item"><div class="wc-more-title">语法要点</div><div class="wc-more-list">${grammar.map(x => `<div class="wc-more-li">${escapeHtml(x)}</div>`).join('')}</div></div>` : '';
+    const keywordHtml = keywords.length ? `<div class="wc-more-item"><div class="wc-more-title">关键词</div><div class="wc-chip-row">${keywords.map(k => `<span class="wc-chip">${escapeHtml(k)}</span>`).join('')}</div></div>` : '';
+    return `${altHtml}${grammarHtml}${keywordHtml}`;
+}
+
+function kindForEnhance(isSingleWord) {
+    return isSingleWord ? 'word' : 'sentence';
+}
+
+async function copyToClipboard(text) {
+    const value = String(text ?? '');
+    try {
+        await navigator.clipboard.writeText(value);
+        return;
+    } catch {
+    }
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+}
+
+function flashButton(btn) {
+    if (!btn) return;
+    btn.classList.add('flash');
+    setTimeout(() => btn.classList.remove('flash'), 500);
 }
