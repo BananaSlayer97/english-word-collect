@@ -5,7 +5,7 @@
   "description": "Collect and learn English words while browsing. 智能划词翻译，一键收藏单词，真人语音朗读，高效学习英语。",
   "default_locale": "zh_CN",
   "author": "Word Collector Team",
-  "homepage_url": "https://github.com/your-username/english-word-collect",
+  "homepage_url": "https://github.com/BananaSlayer97/english-word-collect",
   "permissions": [
     "storage",
     "tts"
